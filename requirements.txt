@@ -25,3 +25,7 @@ langgraph
 agno
 websockets
 sqlalchemy
+pycryptodome
+paho-mqtt
+langchain 
+langchain-openai
