@@ -4,6 +4,7 @@ from . import config
 from . import constants
 from robot import logging
 from robot.sdk.AbstractPlugin import AbstractPlugin
+import importlib.util
 
 logger = logging.getLogger(__name__)
 _has_init = False
@@ -29,8 +30,11 @@ def init_plugins(con):
 
     for finder, name, ispkg in pkgutil.walk_packages(locations):
         try:
-            loader = finder.find_module(name)
-            mod = loader.load_module(name)
+            spec = finder.find_spec(name)
+            if spec is None:
+                continue
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
         except Exception:
             logger.warning(f"插件 {name} 加载出错，跳过", exc_info=True)
             continue
