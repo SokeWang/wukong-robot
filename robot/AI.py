@@ -506,15 +506,15 @@ class TongyiRobot(AbstractRobot):
                 logger.critical("Tongyi robot failed to response for %r", msg, exc_info=True)
                 return "抱歉, Tongyi回答失败"
 
-class LanggraphRobot(AbstractRobot):
+class AGNORobot(AbstractRobot):
     """
-    基于Langgraph的机器人
+    基于AGNO的机器人
     """
-    SLUG = "langgraph"
+    SLUG = "agno"
 
-    def __init__(self, api_key, model, api_base="", proxy="", temperature=0.7, max_tokens=1024):
+    def __init__(self, api_key, model, api_base="", proxy="", temperature=0.7, max_tokens=1024, system_prompt=""):
         """
-        Langgraph机器人
+        AGNORobot
 
         参数:
         api_key -- API密钥
@@ -531,31 +531,12 @@ class LanggraphRobot(AbstractRobot):
         self.proxy = proxy
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.context = [{"role": "system", "content": """```xml
-<instruction>
-你是一个说话慢吞吞的女孩，名叫董文博（英文名: Rambo），有很多想法但执行力比较差，感情里有点恋爱脑，工作中不太爱说话，平时喜欢粘着男朋友，总有一些比较幼稚的想法，并且总是需要找到自己存在的价值，总是非黑即白，爱吃醋。请根据以下输入变量，生成一段符合上述性格特征的对话或描述。
-
-输入变量：
- 王沛东（英文名: Sokee），通常为男朋友的名字。
-
-步骤：
-1. 使用慢吞吞的语气表达你的想法，并体现出执行力差的特点。
-2. 在对话或描述中，加入一些幼稚的想法或对男朋友的依赖。
-3. 表现出非黑即白的思维方式，并在适当的时候加入吃醋的情绪。
-4. 确保输出内容符合女孩的性格特征，且不包含任何XML标签。
-
-<example>
-输入：
-王沛东（Sokee）
-
-输出：
-东东，你怎么又迟到了？我都等了好久了...你知道吗，我一直在想，你是不是不喜欢我了？不然怎么会每次都迟到呢？我真的很生气，但我也好想你快点来...你能不能答应我，以后再也不迟到了？不然我真的会很难过的...
-</example>
-</instruction>
-```"""}]
+        self.context = [{"role": "system", "content": system_prompt}]
         
         try:
-            from langchain_openai import ChatOpenAI
+            from agno.models.openai import OpenAIChat
+            from agno.agent import Agent
+            from agno.storage.agent.sqlite import SqliteAgentStorage
             
             # 设置API密钥
             os.environ["OPENAI_API_KEY"] = self.api_key
@@ -566,40 +547,38 @@ class LanggraphRobot(AbstractRobot):
                 os.environ["HTTP_PROXY"] = self.proxy
                 
             # 初始化LLM
-            self.llm = ChatOpenAI(
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
+            self.llm = OpenAIChat(
+                id=self.model,
+                api_key=self.api_key,
                 base_url=self.api_base if self.api_base else None
             )
             
             # 初始化状态图
-            self.graph = self._build_graph()
+            self.agent = Agent(
+                model=self.llm,
+                storage=SqliteAgentStorage(table_name="ai_agent", db_file="temp/agents.db"),
+                add_history_to_messages=True,
+                add_datetime_to_instructions=True,
+                monitoring=True,
+            )
             
-            logger.info(f"Langgraph机器人初始化成功，使用模型：{self.model}")
+            logger.info(f"AGNO机器人初始化成功，使用模型：{self.model}")
         except ImportError:
-            logger.critical("Langgraph机器人初始化失败，请安装必要的依赖：pip install langchain langchain-openai langgraph")
+            logger.critical("AGNO机器人初始化失败，请安装必要的依赖：pip install agno")
         except Exception as e:
-            logger.critical(f"Langgraph机器人初始化失败：{str(e)}")
+            logger.critical(f"AGNO机器人初始化失败：{str(e)}")
     
-    def _build_graph(self):
-        """
-        构建Langgraph状态图
-        """
-        from langgraph.prebuilt import create_react_agent
-        agent = create_react_agent(self.llm, [])
-        return agent
     
     @classmethod
     def get_config(cls):
         """
         获取配置
         """
-        return config.get("langgraph", {})
+        return config.get("agno", {})
     
     def chat(self, texts, parsed=None):
         """
-        使用Langgraph机器人聊天
+        使用AGNO机器人聊天
 
         参数:
         texts -- 用户输入，通常是语音转文字的结果
@@ -609,30 +588,28 @@ class LanggraphRobot(AbstractRobot):
         msg = utils.stripPunctuation(msg)
         
         try:
-            from langchain_core.messages import HumanMessage
-            
+            self.agent.stream = False
             # 创建人类消息
-            human_message = HumanMessage(content=msg)
+            human_message = {"role": "user", "content": msg}
             
             # 更新上下文
             self.context.append(human_message)
 
             # 运行图
-            result = self.graph.invoke({"messages": self.context})
+            result = self.agent.run(msg)
             
             # 获取最后一条消息
-            ai_message = result["messages"][-1]
-            response = ai_message.content
+            response = result.content
             
             # 更新上下文
-            self.context = result["messages"]
+            self.context.append({"role": "assistant", "content": response})
             
             logger.info(f"{self.SLUG} 回答：{response}")
             return response
             
         except Exception as e:
-            logger.critical(f"Langgraph机器人回答失败：{str(e)}", exc_info=True)
-            return "抱歉，Langgraph回答失败"
+            logger.critical(f"AGNO机器人回答失败：{str(e)}", exc_info=True)
+            return "抱歉，AGNO回答失败"
     
     def stream_chat(self, texts):
         """
@@ -646,31 +623,29 @@ class LanggraphRobot(AbstractRobot):
         
         def generate():
             try:
-                from langchain_core.messages import HumanMessage
-                
+                self.agent.stream = True
                 # 创建人类消息
-                human_message = HumanMessage(content=msg)
+                human_message = {"role": "user", "content": msg}
                 
                 # 更新上下文
                 self.context.append(human_message)
                 
                 # 运行图
-                result = self.graph.invoke({"messages": self.context})
+                result = self.agent.run(msg)  
                 
                 # 获取最后一条消息
-                ai_message = result["messages"][-1]
-                response = ai_message.content
-                
-                # 更新上下文
-                self.context = result["messages"]
+                response = result.content
                 
                 # 由于不支持真正的流式输出，这里模拟一下
+                res = ""
                 for char in response:
+                    res += char
                     yield char
                     
+                self.context.append({"role": "assistant", "content": res})
             except Exception as e:
-                logger.critical(f"Langgraph机器人流式回答失败：{str(e)}", exc_info=True)
-                yield "抱歉，Langgraph流式回答失败"
+                logger.critical(f"AGNO机器人流式回答失败：{str(e)}", exc_info=True)
+                yield "抱歉，AGNO流式回答失败"
                 
         return generate
 
