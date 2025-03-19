@@ -531,7 +531,6 @@ class AGNORobot(AbstractRobot):
         self.proxy = proxy
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.system_prompt = system_prompt
         self.context = [{"role": "system", "content": system_prompt}]
         
         try:
@@ -561,7 +560,7 @@ class AGNORobot(AbstractRobot):
                 add_history_to_messages=True,
                 add_datetime_to_instructions=True,
                 monitoring=True,
-                system_prompt=self.system_prompt
+                description=system_prompt
             )
             
             logger.info(f"AGNO机器人初始化成功，使用模型：{self.model}")
